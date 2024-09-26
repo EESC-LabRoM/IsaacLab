@@ -100,7 +100,7 @@ class CommandsCfg:
         heading_control_stiffness=0.5,
         debug_vis=True,
         ranges=mdp.UniformVelocityCommandCfg.Ranges(
-            lin_vel_x=(-1.0, 1.0), lin_vel_y=(-1.0, 1.0), ang_vel_z=(-1.0, 1.0), heading=(-math.pi, math.pi)
+            lin_vel_x=(-3.0, 3.0), lin_vel_y=(-3.0, 3.0), ang_vel_z=(-3.0, 3.0), heading=(-math.pi, math.pi)
         ),
     )
 
@@ -216,6 +216,48 @@ class EventCfg:
         interval_range_s=(10.0, 15.0),
         params={"velocity_range": {"x": (-0.5, 0.5), "y": (-0.5, 0.5)}},
     )
+
+
+
+@configclass
+class RewardsWalkTheseWaysCfg:
+    """Reward terms for the MDP."""
+
+    ## TODO - check the std value how to calculate that in the paper
+    ## TODO - check if all joints have joint_id 
+    
+    # -- Task
+    xy_velocity_tracking = RewTerm(
+        func=mdp.track_lin_vel_xy_exp, weight=0.02, params={"command_name": "base_velocity", "std": math.sqrt(0.25)}
+    )
+    yaw_velocity_tracking = RewTerm(
+        func=mdp.track_ang_vel_z_exp, weight=0.01, params={"command_name": "base_velocity", "std": math.sqrt(0.25)}
+    )
+    
+    # -- Augmented Auxiliary
+    swing_phase_tracking = None 
+    body_pitch_tracking = RewTerm(func=mdp.flat_orientation_l2, weight=0.0)
+    
+    
+    
+    # -- Fixed Auxiliary
+    z_velocity = RewTerm(func=mdp.lin_vel_z_l2, weight=-4e-4)
+    roll_pitch_velocity = RewTerm(func=mdp.ang_vel_xy_l2, weight=-2e-5)
+    foot_slip = None 
+    thigh_calf_collision = None 
+    joint_limit_violation = RewTerm(func=mdp.joint_pos_limits, weight=-0.2)
+    joint_torques = RewTerm(func=mdp.joint_torques_l2, weight=-2.0e-5)
+    joint_velocities = None
+    joint_accelerations = RewTerm(func=mdp.joint_acc_l2, weight=-5e-9)
+    action_smoothing = RewTerm(func=mdp.action_rate_l2, weight=-2e-3)
+    action_smoothing_2nd_order = None 
+    
+    undesired_contacts = RewTerm(
+        func=mdp.undesired_contacts,
+        weight=-1.0,
+        params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*THIGH"), "threshold": 1.0},
+    )
+    # -- optional penalties
 
 
 @configclass

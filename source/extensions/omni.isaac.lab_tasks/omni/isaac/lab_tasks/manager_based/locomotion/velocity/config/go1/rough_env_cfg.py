@@ -18,7 +18,10 @@ class UnitreeGo1RoughEnvCfg(LocomotionVelocityRoughEnvCfg):
     def __post_init__(self):
         # post init of parent
         super().__post_init__()
-
+        
+        # Important to setup the num_rows/num_cols to match the number of
+        self.scene.terrain.terrain_generator.num_rows = 55
+        self.scene.terrain.terrain_generator.num_cols = 55
         self.scene.robot = UNITREE_GO1_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
         self.scene.height_scanner.prim_path = "{ENV_REGEX_NS}/Robot/trunk"
         # scale down the terrains because the robot is small

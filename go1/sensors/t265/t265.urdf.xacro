@@ -1,0 +1,42 @@
+<?xml version="1.0"?>
+<robot name="sensor_t265" xmlns:xacro="http://ros.org/wiki/xacro">
+
+  <xacro:macro name="sensor_t265" params="name:=camera parent *origin">
+    <xacro:property name="M_PI" value="3.1415926535897931" />
+
+    <xacro:property name="t265_cam_width" value="0.108"/>
+    <xacro:property name="t265_cam_height" value="0.0255"/>
+    <xacro:property name="t265_cam_depth" value="0.0125"/>
+
+    <!-- camera body -->
+    <joint name="${name}_joint" type="fixed">
+      <xacro:insert_block name="origin" />
+      <parent link="${parent}"/>
+      <child link="${name}_pose_frame" />
+    </joint>
+    <link name="${name}_pose_frame"/>
+
+    <joint name="${name}_link_joint" type="fixed">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <parent link="${name}_pose_frame"/>
+      <child link="${name}_link" />
+    </joint>
+
+    <link name="${name}_link">
+      <visual>
+        <origin xyz="-${t265_cam_depth/2} -${t265_cam_width/2} -${t265_cam_height/2}" rpy="${M_PI/2} 0 ${M_PI/2}"/>
+        <geometry>
+          <mesh filename="package://legged_unitree_description/urdf/sensors/t265/t265.stl" scale="0.001 0.001 0.001" />
+        </geometry>
+        <material name="aluminum"/>
+      </visual>
+      <collision>
+        <geometry>
+          <box size="${t265_cam_depth} ${t265_cam_width} ${t265_cam_height}"/>
+        </geometry>
+      </collision>
+    </link>
+
+  </xacro:macro>
+
+</robot>

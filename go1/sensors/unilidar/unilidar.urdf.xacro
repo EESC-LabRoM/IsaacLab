@@ -1,0 +1,58 @@
+<?xml version="1.0"?>
+<robot name="unilidar" xmlns:xacro="http://ros.org/wiki/xacro">
+
+  <xacro:macro name="unilidar" params="name:=unilidar parent *origin">
+
+    <xacro:property name="M_PI" value="3.1415926535897931" />
+    <xacro:property name="lidar_radius" value="0.032"/>
+    <xacro:property name="lidar_length" value="0.065"/>
+
+    <joint name="unilidar_lidar_joint" type="fixed">
+      <xacro:insert_block name="origin" />
+      <parent link="${parent}"/>
+      <child link="unilidar_lidar" />
+    </joint>
+
+    <link name="unilidar_lidar">
+      <visual>
+        <origin xyz="-0.007698 -0.014655 0.00667" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="package://legged_unitree_description/urdf/sensors/unilidar/L1_3D_model.stl" scale="0.001 0.001 0.001" />
+        </geometry>
+        <material name="aluminum"/>
+      </visual>
+      <collision>
+        <origin xyz="0 0 ${lidar_length/2}" rpy="0 0 0"/>
+        <geometry>
+          <cylinder length="${lidar_length}" radius="${lidar_radius}"/>
+        </geometry>
+        <material name="blue"/>
+      </collision>
+    </link>
+
+    <joint name="unilidar_imu_joint" type="fixed">
+      <origin xyz="-0.007698 -0.014655 0.00667" rpy="0 0 0"/>
+      <parent link="unilidar_lidar"/>
+      <child link="unilidar_imu" />
+    </joint>
+
+    <link name="unilidar_imu">
+      <visual>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <box size="0.01 0.01 0.01"/>
+        </geometry>
+        <material name="red"/>
+      </visual>
+      <collision>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <box size="0.01 0.01 0.01"/>
+        </geometry>
+        <material name="blue"/>
+      </collision>
+    </link>
+
+  </xacro:macro>
+
+</robot>

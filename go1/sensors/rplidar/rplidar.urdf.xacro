@@ -1,0 +1,52 @@
+<?xml version="1.0"?>
+
+<robot name="rplidar" xmlns:xacro="http://ros.org/wiki/xacro">
+  <!-- Includes -->
+  <!-- <xacro:include filename="$(find legged_unitree_description)/urdf/sensors/rplidar/rplidar.gazebo.xacro"/> -->
+
+  <xacro:macro name="sensor_rplidar" params="name:=unilidar parent *origin simulation:=true">
+
+    <xacro:property name="M_PI" value="3.1415926535897931" />
+    <xacro:property name="lidar_radius" value="0.032"/>
+    <xacro:property name="lidar_length" value="0.065"/>
+
+    <joint name="$rplidar_base_joint" type="fixed">
+      <xacro:insert_block name="origin" />
+      <parent link="${parent}"/>
+      <child link="rplidar_base" />
+    </joint>
+
+    <link name="rplidar_base">
+      <visual>
+        <!-- <origin xyz="0 0 -0.245" rpy="0 0 0"/> -->  <!--coordinate frame aligned with laser beam -->
+        <origin xyz="0 0 -0.19" rpy="0 0 ${M_PI/2}"/>
+        <geometry>
+          <mesh filename="package://legged_unitree_description/urdf/sensors/rplidar/lidar_2d_go1.stl" scale="0.001 0.001 0.001"/>
+        </geometry>
+        <material name="aluminum"/>
+      </visual>
+      <collision>
+        <origin xyz="0 0 ${lidar_length/2}" rpy="0 0 0"/>
+        <geometry>
+          <cylinder length="${lidar_length}" radius="${lidar_radius}"/>
+        </geometry>
+        <material name="blue"/>
+      </collision>
+    </link>
+
+    <joint name="$rplidar_laser_joint" type="fixed">
+      <origin xyz="0 0 0.055" rpy="0 0 0"/>
+      <parent link="rplidar_base"/>
+      <child link="rplidar_laser" />
+    </joint>
+
+    <link name="rplidar_laser"/>
+
+    <!-- 2D Laser gazebo plugin -->
+    <!-- <xacro:if value="${simulation}">
+      TODO!
+    </xacro:if> -->
+
+  </xacro:macro>
+
+</robot>

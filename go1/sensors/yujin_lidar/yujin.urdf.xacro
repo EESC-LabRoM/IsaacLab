@@ -1,0 +1,41 @@
+<?xml version="1.0"?>
+<robot name="sensor_yujin" xmlns:xacro="http://ros.org/wiki/xacro">
+
+  <xacro:macro name="sensor_yujin" params="name:=yrl parent *origin">
+
+    <xacro:property name="M_PI" value="3.1415926535897931" />
+    <xacro:property name="lidar_radius" value="0.032"/>
+    <xacro:property name="lidar_length" value="0.090"/>
+
+    <joint name="${name}_joint" type="fixed">
+      <xacro:insert_block name="origin" />
+      <parent link="${parent}"/>
+      <child link="${name}_base" />
+    </joint>
+    <link name="${name}_base"/>
+
+    <joint name="${name}_link_joint" type="fixed">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <parent link="${name}_base"/>
+      <child link="${name}_link" />
+    </joint>
+
+    <link name="${name}_link">
+      <visual>
+        <origin xyz="-${lidar_radius} ${lidar_radius} -${lidar_length*3/4}" rpy="${M_PI/2} 0 0"/>
+        <geometry>
+          <mesh filename="package://legged_unitree_description/urdf/sensors/yujin_lidar/yujin_lidar_YRL3-05.stl" scale="0.001 0.001 0.001" />
+        </geometry>
+        <material name="aluminum"/>
+      </visual>
+      <collision>
+        <origin xyz="0 0 -${lidar_length/4}" rpy="0 0 0"/>
+        <geometry>
+          <cylinder length="${lidar_length}" radius="${lidar_radius}"/>
+        </geometry>
+      </collision>
+    </link>
+
+  </xacro:macro>
+
+</robot>

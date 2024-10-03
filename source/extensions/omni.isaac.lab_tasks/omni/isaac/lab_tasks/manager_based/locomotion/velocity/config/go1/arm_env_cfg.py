@@ -6,6 +6,11 @@
 import math
 from dataclasses import MISSING
 
+import torch
+
+from omni.isaac.lab.actuators.actuator_cfg import ActuatorNetMLPCfg, ImplicitActuatorCfg
+from omni.isaac.lab.assets.rigid_object.rigid_object import RigidObject
+from omni.isaac.lab.envs.manager_based_rl_env import ManagerBasedRLEnv
 import omni.isaac.lab.sim as sim_utils
 from omni.isaac.lab.assets import ArticulationCfg, AssetBaseCfg
 from omni.isaac.lab.envs import ManagerBasedRLEnvCfg
@@ -21,20 +26,94 @@ from omni.isaac.lab.sensors import ContactSensorCfg, RayCasterCfg, patterns
 from omni.isaac.lab.terrains import TerrainImporterCfg
 from omni.isaac.lab.utils import configclass
 from omni.isaac.lab.utils.assets import ISAAC_NUCLEUS_DIR, ISAACLAB_NUCLEUS_DIR
+from omni.isaac.lab.utils.math import combine_frame_transforms
 from omni.isaac.lab.utils.noise import AdditiveUniformNoiseCfg as Unoise
 
 import omni.isaac.lab_tasks.manager_based.locomotion.velocity.mdp as mdp
 
 ##
-# Pre-defined configs
-##
-from omni.isaac.lab.terrains.config.rough import ROUGH_TERRAINS_CFG  # isort: skip
-
-
-##
 # Scene definition
 ##
 
+def position_command_error(env: ManagerBasedRLEnv, command_name: str, asset_cfg: SceneEntityCfg) -> torch.Tensor:
+    """Penalize tracking of the position error using L2-norm.
+
+    The function computes the position error between the desired position (from the command) and the
+    current position of the asset's body (in world frame). The position error is computed as the L2-norm
+    of the difference between the desired and current positions.
+    """
+    # extract the asset (to enable type hinting)
+    asset: RigidObject = env.scene[asset_cfg.name]
+    command = env.command_manager.get_command(command_name)
+    # obtain the desired and current positions
+    des_pos_b = command[:, :3]
+    des_pos_w, _ = combine_frame_transforms(asset.data.root_state_w[:, :3], asset.data.root_state_w[:, 3:7], des_pos_b)
+    curr_pos_w = asset.data.body_state_w[:, asset_cfg.body_ids[0], :3]  # type: ignore
+    return torch.norm(curr_pos_w - des_pos_w, dim=1)
+
+GO1_ACTUATOR_CFG = ActuatorNetMLPCfg(
+    joint_names_expr=[".*_hip_joint", ".*_thigh_joint", ".*_calf_joint"],
+    network_file=f"{ISAACLAB_NUCLEUS_DIR}/ActuatorNets/Unitree/unitree_go1.pt",
+    pos_scale=-1.0,
+    vel_scale=1.0,
+    torque_scale=1.0,
+    input_order="pos_vel",
+    input_idx=[0, 1, 2],
+    effort_limit=23.7,  # taken from spec sheet
+    velocity_limit=30.0,  # taken from spec sheet
+    saturation_effort=23.7,  # same as effort limit
+)
+
+WIDOW_250S_ACTUATOR_CFG = ImplicitActuatorCfg(
+            joint_names_expr=["widow_.*"],
+            effort_limit=87.0,
+            velocity_limit=2.175,
+            stiffness=5.0,
+            damping=.5,
+        )
+
+"""Configuration of Go1 actuators using MLP model.
+
+Actuator specifications: https://shop.unitree.com/products/go1-motor
+
+This model is taken from: https://github.com/Improbable-AI/walk-these-ways
+"""
+
+UNITREE_GO1_ARM_CFG = ArticulationCfg(
+    spawn=sim_utils.UsdFileCfg(
+        usd_path=f"omniverse://localhost/Library/widow_go1.usdc",
+        activate_contact_sensors=True,
+        rigid_props=sim_utils.RigidBodyPropertiesCfg(
+            disable_gravity=False,
+            retain_accelerations=False,
+            linear_damping=0.0,
+            angular_damping=0.0,
+            max_linear_velocity=1000.0,
+            max_angular_velocity=1000.0,
+            max_depenetration_velocity=1.0,
+        ),
+        articulation_props=sim_utils.ArticulationRootPropertiesCfg(
+            enabled_self_collisions=False, solver_position_iteration_count=4, solver_velocity_iteration_count=0
+        ),
+    ),
+    init_state=ArticulationCfg.InitialStateCfg(
+        pos=(0.0, 0.0, 0.4),
+        joint_pos={
+            ".*L_hip_joint": 0.1,
+            ".*R_hip_joint": -0.1,
+            "F[L,R]_thigh_joint": 0.8,
+            "R[L,R]_thigh_joint": 1.0,
+            ".*_calf_joint": -1.5,
+            "widow_.*": 0,
+        },
+        joint_vel={".*": 0.0},
+    ),
+    soft_joint_pos_limit_factor=0.9,
+    actuators={
+        "base_legs": GO1_ACTUATOR_CFG,
+        "arm_legs": WIDOW_250S_ACTUATOR_CFG,
+    },
+)
 
 @configclass
 class MySceneCfg(InteractiveSceneCfg):
@@ -43,9 +122,8 @@ class MySceneCfg(InteractiveSceneCfg):
     # ground terrain
     terrain = TerrainImporterCfg(
         prim_path="/World/ground",
-        terrain_type="generator",
-        terrain_generator=ROUGH_TERRAINS_CFG,
-        max_init_terrain_level=5,
+        terrain_type="plane",
+        terrain_generator=None,
         collision_group=-1,
         physics_material=sim_utils.RigidBodyMaterialCfg(
             friction_combine_mode="multiply",
@@ -61,7 +139,7 @@ class MySceneCfg(InteractiveSceneCfg):
         debug_vis=False,
     )
     # robots
-    robot: ArticulationCfg = MISSING
+    robot: ArticulationCfg = UNITREE_GO1_ARM_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
     # sensors
     height_scanner = RayCasterCfg(
         prim_path="{ENV_REGEX_NS}/Robot/base",
@@ -85,31 +163,38 @@ class MySceneCfg(InteractiveSceneCfg):
 ##
 # MDP settings
 ##
-
-
 @configclass
 class CommandsCfg:
     """Command specifications for the MDP."""
 
-    base_velocity = mdp.UniformVelocityCommandCfg(
-        asset_name="robot",
-        resampling_time_range=(10.0, 10.0),
-        rel_standing_envs=0.02,
-        rel_heading_envs=1.0,
-        heading_command=True,
-        heading_control_stiffness=0.5,
+    # base_velocity = mdp.UniformVelocityCommandCfg(
+    #     asset_name="robot",
+    #     resampling_time_range=(10.0, 10.0),
+    #     rel_standing_envs=0.02,
+    #     rel_heading_envs=1.0,
+    #     heading_command=True,
+    #     heading_control_stiffness=0.5,
+    #     debug_vis=True,
+    #     ranges=mdp.UniformVelocityCommandCfg.Ranges(
+    #         lin_vel_x=(-3.0, 3.0), lin_vel_y=(-3.0, 3.0), ang_vel_z=(-3.0, 3.0), heading=(-math.pi, math.pi)
+    #     ),
+    # )
+
+    arm_pose = mdp.UniformPoseCommandCfg(
+        asset_name = "robot",
+        resampling_time_range=(10, 10),
         debug_vis=True,
-        ranges=mdp.UniformVelocityCommandCfg.Ranges(
-            lin_vel_x=(-3.0, 3.0), lin_vel_y=(-3.0, 3.0), ang_vel_z=(-3.0, 3.0), heading=(-math.pi, math.pi)
-        ),
+        ranges=mdp.UniformPoseCommandCfg.Ranges(
+            pos_x=(0, .3), pos_y=(-0.2, 0.2), pos_z= (0, .3 ), roll=(0,0), yaw=(-3.14, 3.14)
+        )
     )
 
 
 @configclass
 class ActionsCfg:
     """Action specifications for the MDP."""
-
     joint_pos = mdp.JointPositionActionCfg(asset_name="robot", joint_names=[".*"], scale=0.5, use_default_offset=True)
+
 
 
 @configclass
@@ -120,14 +205,16 @@ class ObservationsCfg:
     class PolicyCfg(ObsGroup):
         """Observations for policy group."""
 
-        # observation terms (order preserved)
+        # observation terms
         base_lin_vel = ObsTerm(func=mdp.base_lin_vel, noise=Unoise(n_min=-0.1, n_max=0.1))
         base_ang_vel = ObsTerm(func=mdp.base_ang_vel, noise=Unoise(n_min=-0.2, n_max=0.2))
         projected_gravity = ObsTerm(
             func=mdp.projected_gravity,
             noise=Unoise(n_min=-0.05, n_max=0.05),
         )
-        velocity_commands = ObsTerm(func=mdp.generated_commands, params={"command_name": "base_velocity"})
+        # base_commands = ObsTerm(func=mdp.generated_commands, params={"command_name": "base_velocity"})
+        arm_commands = ObsTerm(func=mdp.generated_commands, params={"command_name": "arm_pose"})
+
         joint_pos = ObsTerm(func=mdp.joint_pos_rel, noise=Unoise(n_min=-0.01, n_max=0.01))
         joint_vel = ObsTerm(func=mdp.joint_vel_rel, noise=Unoise(n_min=-1.5, n_max=1.5))
         actions = ObsTerm(func=mdp.last_action)
@@ -174,15 +261,15 @@ class EventCfg:
     )
 
     # reset
-    base_external_force_torque = EventTerm(
-        func=mdp.apply_external_force_torque,
-        mode="reset",
-        params={
-            "asset_cfg": SceneEntityCfg("robot", body_names="base"),
-            "force_range": (0.0, 0.0),
-            "torque_range": (-0.0, 0.0),
-        },
-    )
+    # base_external_force_torque = EventTerm(
+    #     func=mdp.apply_external_force_torque,
+    #     mode="reset",
+    #     params={
+    #         "asset_cfg": SceneEntityCfg("robot", body_names="base"),
+    #         "force_range": (0.0, 0.0),
+    #         "torque_range": (-0.0, 0.0),
+    #     },
+    # )
 
     reset_base = EventTerm(
         func=mdp.reset_root_state_uniform,
@@ -209,54 +296,14 @@ class EventCfg:
         },
     )
 
-    # interval
-    push_robot = EventTerm(
-        func=mdp.push_by_setting_velocity,
-        mode="interval",
-        interval_range_s=(10.0, 15.0),
-        params={"velocity_range": {"x": (-0.5, 0.5), "y": (-0.5, 0.5)}},
-    )
+    # # interval
+    # push_robot = EventTerm(
+    #     func=mdp.push_by_setting_velocity,
+    #     mode="interval",
+    #     interval_range_s=(10.0, 15.0),
+    #     params={"velocity_range": {"x": (-0.5, 0.5), "y": (-0.5, 0.5)}},
+    # )
 
-
-
-@configclass
-class RewardsWalkTheseWaysCfg:
-    """Reward terms for the MDP."""
-
-    ## TODO - check the std value how to calculate that in the paper
-    ## TODO - check if all joints have joint_id 
-    # -- Task
-    xy_velocity_tracking = RewTerm(
-        func=mdp.track_lin_vel_xy_exp, weight=0.02, params={"command_name": "base_velocity", "std": math.sqrt(0.25)}
-    )
-    yaw_velocity_tracking = RewTerm(
-        func=mdp.track_ang_vel_z_exp, weight=0.01, params={"command_name": "base_velocity", "std": math.sqrt(0.25)}
-    )
-    
-    # -- Augmented Auxiliary
-    swing_phase_tracking = None 
-    body_pitch_tracking = RewTerm(func=mdp.flat_orientation_l2, weight=0.0)
-    
-    
-    
-    # -- Fixed Auxiliary
-    z_velocity = RewTerm(func=mdp.lin_vel_z_l2, weight=-4e-4)
-    roll_pitch_velocity = RewTerm(func=mdp.ang_vel_xy_l2, weight=-2e-5)
-    foot_slip = None 
-    thigh_calf_collision = None 
-    joint_limit_violation = RewTerm(func=mdp.joint_pos_limits, weight=-0.2)
-    joint_torques = RewTerm(func=mdp.joint_torques_l2, weight=-2.0e-5)
-    joint_velocities = None
-    joint_accelerations = RewTerm(func=mdp.joint_acc_l2, weight=-5e-9)
-    action_smoothing = RewTerm(func=mdp.action_rate_l2, weight=-2e-3)
-    action_smoothing_2nd_order = None 
-    
-    undesired_contacts = RewTerm(
-        func=mdp.undesired_contacts,
-        weight=-1.0,
-        params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*THIGH"), "threshold": 1.0},
-    )
-    # -- optional penalties
 
 
 @configclass
@@ -264,36 +311,47 @@ class RewardsCfg:
     """Reward terms for the MDP."""
 
     # -- task
-    track_lin_vel_xy_exp = RewTerm(
-        func=mdp.track_lin_vel_xy_exp, weight=1.0, params={"command_name": "base_velocity", "std": math.sqrt(0.25)}
+    
+    # track_base_lin_vel_xy_exp = RewTerm(
+    #     func=mdp.track_lin_vel_xy_exp, weight=1.0, params={"command_name": "base_velocity", "std": math.sqrt(0.25)}
+    # )
+    # track_base_ang_vel_z_exp = RewTerm(
+    #     func=mdp.track_ang_vel_z_exp, weight=0.5, params={"command_name": "base_velocity", "std": math.sqrt(0.25)}
+    # )
+    track_arm_pose_exp = RewTerm(
+        func=position_command_error, weight=0.5, params={"command_name": "arm_pose", "std": math.sqrt(0.25)}
     )
-    track_ang_vel_z_exp = RewTerm(
-        func=mdp.track_ang_vel_z_exp, weight=0.5, params={"command_name": "base_velocity", "std": math.sqrt(0.25)}
-    )
-    # -- penalties
-    lin_vel_z_l2 = RewTerm(func=mdp.lin_vel_z_l2, weight=-2.0)
-    ang_vel_xy_l2 = RewTerm(func=mdp.ang_vel_xy_l2, weight=-0.05)
-    dof_torques_l2 = RewTerm(func=mdp.joint_torques_l2, weight=-1.0e-5)
-    dof_acc_l2 = RewTerm(func=mdp.joint_acc_l2, weight=-2.5e-7)
-    action_rate_l2 = RewTerm(func=mdp.action_rate_l2, weight=-0.01)
-    feet_air_time = RewTerm(
-        func=mdp.feet_air_time,
-        weight=0.125,
-        params={
-            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*FOOT"),
-            "command_name": "base_velocity",
-            "threshold": 0.5,
-        },
-    )
-    undesired_contacts = RewTerm(
-        func=mdp.undesired_contacts,
-        weight=-1.0,
-        params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*THIGH"), "threshold": 1.0},
-    )
-    # -- optional penalties
-    flat_orientation_l2 = RewTerm(func=mdp.flat_orientation_l2, weight=0.0)
-    dof_pos_limits = RewTerm(func=mdp.joint_pos_limits, weight=0.0)
 
+    # # -- penalties
+    # lin_vel_z_l2 = RewTerm(func=mdp.lin_vel_z_l2, weight=-2.0)
+    # ang_vel_xy_l2 = RewTerm(func=mdp.ang_vel_xy_l2, weight=-0.05)
+    # dof_torques_l2 = RewTerm(func=mdp.joint_torques_l2, weight=-1.0e-5)
+    # dof_acc_l2 = RewTerm(func=mdp.joint_acc_l2, weight=-2.5e-7)
+    # action_rate_l2 = RewTerm(func=mdp.action_rate_l2, weight=-0.01)
+    # feet_air_time = RewTerm(
+    #     func=mdp.feet_air_time,
+    #     weight=0.125,
+    #     params={
+    #         "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*FOOT"),
+    #         "command_name": "base_velocity",
+    #         "threshold": 0.5,
+    #     },
+    # )
+    # undesired_contacts = RewTerm(
+    #     func=mdp.undesired_contacts,
+    #     weight=-1.0,
+    #     params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*THIGH"), "threshold": 1.0},
+    # )
+    # # -- optional penalties
+    # flat_orientation_l2 = RewTerm(func=mdp.flat_orientation_l2, weight=0.0)
+    # dof_pos_limits = RewTerm(func=mdp.joint_pos_limits, weight=0.0)
+
+
+@configclass
+class CurriculumCfg:
+    """Curriculum terms for the MDP."""
+
+    terrain_levels = None
 
 @configclass
 class TerminationsCfg:
@@ -306,20 +364,9 @@ class TerminationsCfg:
     )
 
 
+    
 @configclass
-class CurriculumCfg:
-    """Curriculum terms for the MDP."""
-
-    terrain_levels = CurrTerm(func=mdp.terrain_levels_vel)
-
-
-##
-# Environment configuration
-##
-
-
-@configclass
-class LocomotionVelocityRoughEnvCfg(ManagerBasedRLEnvCfg):
+class WholeBodyFlatEnvCfg(ManagerBasedRLEnvCfg):
     """Configuration for the locomotion velocity-tracking environment."""
 
     # Scene settings
@@ -359,3 +406,17 @@ class LocomotionVelocityRoughEnvCfg(ManagerBasedRLEnvCfg):
         else:
             if self.scene.terrain.terrain_generator is not None:
                 self.scene.terrain.terrain_generator.curriculum = False
+
+@configclass
+class UnitreeGo1FlatEnvCfg(WholeBodyFlatEnvCfg):
+    def __post_init__(self):
+        # post init of parent
+        super().__post_init__()
+
+        # override rewards
+        # self.rewards.flat_orientation_l2.weight = -2.5
+        # self.rewards.feet_air_time.weight = 0.25
+
+        # # no height scan
+        # self.scene.height_scanner = None
+        # self.observations.policy.height_scan = None

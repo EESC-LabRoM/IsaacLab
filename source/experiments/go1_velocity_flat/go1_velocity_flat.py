@@ -154,7 +154,7 @@ class ActionsCfg:
     """Action specifications for the MDP."""
 
     joint_pos = mdp.JointPositionActionCfg(
-        asset_name="robot", joint_names=[".*"], scale=1, use_default_offset=True
+        asset_name="robot", joint_names=[".*"], scale=0.25, use_default_offset=True
     )
 
 
@@ -256,21 +256,6 @@ class EventCfg:
             "velocity_range": (0.0, 0.0),
         },
     )
-
-    # interval (remove?)
-    push_robot = EventTerm(
-        func=mdp.push_by_setting_velocity,
-        mode="interval",
-        interval_range_s=(10.0, 15.0),
-        params={
-            "velocity_range": {
-                "x": (-0.5, 0.5),
-                "y": (-0.5, 0.5),
-                "asset_cfg": SceneEntityCfg("robot", body_names="trunk"),
-            }
-        },
-    )
-
 
 @configclass
 class RewardsCfg:

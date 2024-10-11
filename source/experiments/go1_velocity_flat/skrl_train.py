@@ -12,59 +12,10 @@ a more user-friendly way.
 
 """Launch Isaac Sim Simulator first."""
 
-import argparse
-import sys
+from utils import get_parser
+parser = get_parser('train')
 
 from omni.isaac.lab.app import AppLauncher
-
-# add argparse arguments
-parser = argparse.ArgumentParser(description="Train an RL agent with skrl.")
-parser.add_argument(
-    "--video", action="store_true", default=False, help="Record videos during training."
-)
-parser.add_argument(
-    "--video_length",
-    type=int,
-    default=200,
-    help="Length of the recorded video (in steps).",
-)
-parser.add_argument(
-    "--video_interval",
-    type=int,
-    default=2000,
-    help="Interval between video recordings (in steps).",
-)
-parser.add_argument(
-    "--num_envs", type=int, default=None, help="Number of environments to simulate."
-)
-parser.add_argument("--task", type=str, default=None, help="Name of the task.")
-parser.add_argument(
-    "--seed", type=int, default=None, help="Seed used for the environment"
-)
-parser.add_argument(
-    "--distributed",
-    action="store_true",
-    default=False,
-    help="Run training with multiple GPUs or nodes.",
-)
-parser.add_argument(
-    "--max_iterations", type=int, default=None, help="RL Policy training iterations."
-)
-parser.add_argument(
-    "--ml_framework",
-    type=str,
-    default="torch",
-    choices=["torch", "jax", "jax-numpy"],
-    help="The ML framework used for training the skrl agent.",
-)
-parser.add_argument(
-    "--algorithm",
-    type=str,
-    default="PPO",
-    choices=["PPO", "IPPO", "MAPPO"],
-    help="The RL algorithm used for training the skrl agent.",
-)
-
 # append AppLauncher cli args
 AppLauncher.add_app_launcher_args(parser)
 # parse the arguments
@@ -74,6 +25,7 @@ if args_cli.video:
     args_cli.enable_cameras = True
 
 # clear out sys.argv for Hydra
+import sys
 sys.argv = [sys.argv[0]] + hydra_args
 
 # launch omniverse app
@@ -121,12 +73,12 @@ import go1_velocity_flat
 
 
 gym.register(
-    id="Go1-Velocity-Flat-Unitree-Go1-v0",
+    id="Go1-Velocity-Flat-v0",
     entry_point="omni.isaac.lab.envs:ManagerBasedRLEnv",
     disable_env_checker=True,
     kwargs={
         "rl_games_cfg_entry_point": f"{agents.__name__}:rl_games_ppo_cfg.yaml",
-        "env_cfg_entry_point": go1_velocity_flat.UnitreeGo1FlatEnvCfg,
+        "env_cfg_entry_point": go1_velocity_flat.Go1FlatEnvCfg,
         "skrl_cfg_entry_point": f"{agents.__name__}:skrl_flat_ppo_cfg.yaml",
     },
 )
@@ -140,7 +92,7 @@ agent_cfg_entry_point = (
 )
 
 
-@hydra_task_config("Go1-Velocity-Flat-Unitree-Go1-v0", agent_cfg_entry_point)
+@hydra_task_config("Go1-Velocity-Flat-v0", agent_cfg_entry_point)
 def main(
     env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agent_cfg: dict
 ):
@@ -197,7 +149,7 @@ def main(
 
     # create isaac environment
     env = gym.make(
-        "Go1-Velocity-Flat-Unitree-Go1-v0",
+        "Go1-Velocity-Flat-v0",
         cfg=env_cfg,
         render_mode="rgb_array" if args_cli.video else None,
     )

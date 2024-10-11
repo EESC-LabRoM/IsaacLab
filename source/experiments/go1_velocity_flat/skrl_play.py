@@ -12,35 +12,10 @@ a more user-friendly way.
 
 """Launch Isaac Sim Simulator first."""
 
-import argparse
+from utils import get_parser
+parser = get_parser('play')
 
 from omni.isaac.lab.app import AppLauncher
-
-# add argparse arguments
-parser = argparse.ArgumentParser(description="Play a checkpoint of an RL agent from skrl.")
-parser.add_argument("--video", action="store_true", default=False, help="Record videos during training.")
-parser.add_argument("--video_length", type=int, default=200, help="Length of the recorded video (in steps).")
-parser.add_argument(
-    "--disable_fabric", action="store_true", default=False, help="Disable fabric and use USD I/O operations."
-)
-parser.add_argument("--num_envs", type=int, default=None, help="Number of environments to simulate.")
-parser.add_argument("--task", type=str, default=None, help="Name of the task.")
-parser.add_argument("--checkpoint", type=str, default=None, help="Path to model checkpoint.")
-parser.add_argument(
-    "--ml_framework",
-    type=str,
-    default="torch",
-    choices=["torch", "jax", "jax-numpy"],
-    help="The ML framework used for training the skrl agent.",
-)
-parser.add_argument(
-    "--algorithm",
-    type=str,
-    default="PPO",
-    choices=["PPO", "IPPO", "MAPPO"],
-    help="The RL algorithm used for training the skrl agent.",
-)
-
 # append AppLauncher cli args
 AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
@@ -91,12 +66,12 @@ import agents
 import go1_velocity_flat
 
 gym.register(
-    id="Go1-Velocity-Flat-Unitree-Go1-v0",
+    id="Go1-Velocity-Flat-v0",
     entry_point="omni.isaac.lab.envs:ManagerBasedRLEnv",
     disable_env_checker=True,
     kwargs={
         "rl_games_cfg_entry_point": f"{agents.__name__}:rl_games_ppo_cfg.yaml",
-        "env_cfg_entry_point": go1_velocity_flat.UnitreeGo1FlatEnvCfg_PLAY,
+        "env_cfg_entry_point": go1_velocity_flat.Go1FlatEnvCfg_PLAY,
         "skrl_cfg_entry_point": f"{agents.__name__}:skrl_flat_ppo_cfg.yaml",
     },
 )
@@ -110,13 +85,13 @@ def main():
 
     # parse configuration
     env_cfg = parse_env_cfg(
-        "Go1-Velocity-Flat-Unitree-Go1-v0", device=args_cli.device, num_envs=args_cli.num_envs, use_fabric=not args_cli.disable_fabric
+        "Go1-Velocity-Flat-v0", device=args_cli.device, num_envs=args_cli.num_envs, use_fabric=not args_cli.disable_fabric
     )
     
     try:
-        experiment_cfg = load_cfg_from_registry("Go1-Velocity-Flat-Unitree-Go1-v0", f"skrl_{algorithm}_cfg_entry_point")
+        experiment_cfg = load_cfg_from_registry("Go1-Velocity-Flat-v0", f"skrl_{algorithm}_cfg_entry_point")
     except ValueError:
-        experiment_cfg = load_cfg_from_registry("Go1-Velocity-Flat-Unitree-Go1-v0", "skrl_cfg_entry_point")
+        experiment_cfg = load_cfg_from_registry("Go1-Velocity-Flat-v0", "skrl_cfg_entry_point")
 
     # specify directory for logging experiments (load checkpoint)
     log_root_path = os.path.join("logs", "skrl", experiment_cfg["agent"]["experiment"]["directory"])
@@ -132,7 +107,7 @@ def main():
     log_dir = os.path.dirname(os.path.dirname(resume_path))
 
     # create isaac environment
-    env = gym.make("Go1-Velocity-Flat-Unitree-Go1-v0", cfg=env_cfg, render_mode="rgb_array" if args_cli.video else None)
+    env = gym.make("Go1-Velocity-Flat-v0", cfg=env_cfg, render_mode="rgb_array" if args_cli.video else None)
     # wrap for video recording
     if args_cli.video:
         video_kwargs = {

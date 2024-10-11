@@ -7,7 +7,6 @@ import math
 
 import omni.isaac.lab.sim as sim_utils
 import omni.isaac.lab_tasks.manager_based.locomotion.velocity.mdp as mdp
-from omni.isaac.lab.actuators import ActuatorNetMLPCfg
 from omni.isaac.lab.assets import ArticulationCfg, AssetBaseCfg
 from omni.isaac.lab.envs import ManagerBasedRLEnvCfg
 from omni.isaac.lab.managers import EventTermCfg as EventTerm
@@ -23,68 +22,11 @@ from omni.isaac.lab.utils import configclass
 from omni.isaac.lab.utils.assets import ISAAC_NUCLEUS_DIR, ISAACLAB_NUCLEUS_DIR
 from omni.isaac.lab.utils.noise import AdditiveUniformNoiseCfg as Unoise
 
-##
-# Configuration - Actuators.
-##
+import sys
+from os.path import abspath, dirname, join
+sys.path.append(abspath(join(dirname(abspath(__file__)), "../../../")))
 
-GO1_ACTUATOR_CFG = ActuatorNetMLPCfg(
-    joint_names_expr=[".*_hip_joint", ".*_thigh_joint", ".*_calf_joint"],
-    network_file=f"{ISAACLAB_NUCLEUS_DIR}/ActuatorNets/Unitree/unitree_go1.pt",
-    pos_scale=-1.0,
-    vel_scale=1.0,
-    torque_scale=1.0,
-    input_order="pos_vel",
-    input_idx=[0, 1, 2],
-    effort_limit=23.7,  # taken from spec sheet
-    velocity_limit=30.0,  # taken from spec sheet
-    saturation_effort=23.7,  # same as effort limit
-)
-"""Configuration of Go1 actuators using MLP model.
-
-Actuator specifications: https://shop.unitree.com/products/go1-motor
-
-This model is taken from: https://github.com/Improbable-AI/walk-these-ways
-"""
-
-
-UNITREE_GO1_CFG = ArticulationCfg(
-    prim_path="{ENV_REGEX_NS}/Robot",
-    spawn=sim_utils.UsdFileCfg(
-        usd_path=f"{ISAACLAB_NUCLEUS_DIR}/Robots/Unitree/Go1/go1.usd",
-        activate_contact_sensors=True,
-        rigid_props=sim_utils.RigidBodyPropertiesCfg(
-            disable_gravity=False,
-            retain_accelerations=False,
-            linear_damping=0.0,
-            angular_damping=0.0,
-            max_linear_velocity=1000.0,
-            max_angular_velocity=1000.0,
-            max_depenetration_velocity=1.0,
-        ),
-        articulation_props=sim_utils.ArticulationRootPropertiesCfg(
-            enabled_self_collisions=False,
-            solver_position_iteration_count=4,
-            solver_velocity_iteration_count=0,
-        ),
-    ),
-    init_state=ArticulationCfg.InitialStateCfg(
-        pos=(0.0, 0.0, 0.4),
-        joint_pos={
-            ".*L_hip_joint": 0.1,
-            ".*R_hip_joint": -0.1,
-            "F[L,R]_thigh_joint": 0.8,
-            "R[L,R]_thigh_joint": 1.0,
-            ".*_calf_joint": -1.5,
-        },
-        joint_vel={".*": 0.0},
-    ),
-    soft_joint_pos_limit_factor=0.9,
-    actuators={
-        "base_legs": GO1_ACTUATOR_CFG,
-    },
-)
-"""Configuration of Unitree Go1 using MLP-based actuator model."""
-
+from source.assets.go1_cfg import GO1_CFG
 
 @configclass
 class MySceneCfg(InteractiveSceneCfg):
@@ -110,7 +52,7 @@ class MySceneCfg(InteractiveSceneCfg):
         debug_vis=False,
     )
     # robots
-    robot: ArticulationCfg = UNITREE_GO1_CFG
+    robot: ArticulationCfg = GO1_CFG
     # sensors
     contact_forces = ContactSensorCfg(
         prim_path="{ENV_REGEX_NS}/Robot/.*", history_length=3, track_air_time=True
@@ -321,7 +263,7 @@ class CurriculumCfg:
 
 
 @configclass
-class UnitreeGo1FlatEnvCfg(ManagerBasedRLEnvCfg):
+class Go1FlatEnvCfg(ManagerBasedRLEnvCfg):
     """Configuration for the locomotion velocity-tracking environment."""
 
     # Scene settings
@@ -353,7 +295,7 @@ class UnitreeGo1FlatEnvCfg(ManagerBasedRLEnvCfg):
         self.scene.contact_forces.update_period = self.sim.dt
 
 
-class UnitreeGo1FlatEnvCfg_PLAY(UnitreeGo1FlatEnvCfg):
+class Go1FlatEnvCfg_PLAY(Go1FlatEnvCfg):
     def __post_init__(self) -> None:
         # post init of parent
         super().__post_init__()

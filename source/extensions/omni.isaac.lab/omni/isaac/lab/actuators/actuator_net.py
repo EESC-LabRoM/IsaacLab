@@ -27,7 +27,7 @@ from omni.isaac.lab.utils.assets import read_file
 from .actuator_pd import DCMotor
 
 if TYPE_CHECKING:
-    from .actuator_cfg import ActuatorNetLSTMCfg, ActuatorNetMLPCfg
+    from .actuator_cfg import ActuatorNetLSTMCfg, ActuatorNetMLPCfg, DelayedActuatorNetMLPCfg
 
 
 class ActuatorNetLSTM(DCMotor):
@@ -180,15 +180,27 @@ class ActuatorNetMLP(DCMotor):
         # run network inference
         torques = self.network(network_input).view(self._num_envs, self.num_joints)
         self.computed_effort = torques.view(self._num_envs, self.num_joints) * self.cfg.torque_scale
-
+        # print(f"Self computed effort: {self.computed_effort}")
         # clip the computed effort based on the motor limits
         self.applied_effort = self._clip_effort(self.computed_effort)
-
+        # print(f"Self applied effort: {self.applied_effort}")
         # return torques
         control_action.joint_efforts = self.applied_effort
         control_action.joint_positions = None
         control_action.joint_velocities = None
         return control_action
+
+    def _clip_effort(self, effort: torch.Tensor) -> torch.Tensor:
+        # compute torque limits
+        # -- max limit
+        max_effort = self._saturation_effort #* (1.0 - self._joint_vel / self.velocity_limit)
+        #max_effort = torch.clip(max_effort, min=self._zeros_effort, max=self.effort_limit)
+        # -- min limit
+        min_effort = -self._saturation_effort #* (-1.0 - self._joint_vel / self.velocity_limit)
+        #min_effort = torch.clip(min_effort, min=-self.effort_limit, max=self._zeros_effort)
+
+        # clip the torques based on the motor limits
+        return torch.clip(effort, min=min_effort, max=max_effort)
 
 
 class DelayedActuatorNetMLP(ActuatorNetMLP):
@@ -204,10 +216,10 @@ class DelayedActuatorNetMLP(ActuatorNetMLP):
     to the class.
     """
 
-    cfg: ActuatorNetMLPCfg
+    cfg: DelayedActuatorNetMLPCfg
     """The configuration for the actuator model."""
 
-    def __init__(self, cfg: ActuatorNetMLPCfg, *args, **kwargs):
+    def __init__(self, cfg: DelayedActuatorNetMLPCfg, *args, **kwargs):
         super().__init__(cfg, *args, **kwargs)
         # instantiate the delay buffers
         self.positions_delay_buffer = DelayBuffer(cfg.max_delay, self._num_envs, device=self._device)

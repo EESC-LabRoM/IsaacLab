@@ -6,6 +6,7 @@
 import math
 
 import omni.isaac.lab.sim as sim_utils
+from omni.isaac.lab.terrains.height_field.hf_terrains_cfg import HfSteppingStonesTerrainCfg, HfTerrainBaseCfg
 import omni.isaac.lab_tasks.manager_based.locomotion.velocity.mdp as mdp
 from omni.isaac.lab.actuators import DelayedActuatorNetMLPCfg
 from omni.isaac.lab.assets import ArticulationCfg, AssetBaseCfg
@@ -22,6 +23,7 @@ from omni.isaac.lab.terrains import TerrainImporterCfg
 from omni.isaac.lab.utils import configclass
 from omni.isaac.lab.utils.assets import ISAAC_NUCLEUS_DIR, ISAACLAB_NUCLEUS_DIR
 from omni.isaac.lab.utils.noise import AdditiveUniformNoiseCfg as Unoise
+import omni.isaac.lab.terrains as terrain_gen
 
 ##
 # Configuration - Actuators.
@@ -29,30 +31,32 @@ from omni.isaac.lab.utils.noise import AdditiveUniformNoiseCfg as Unoise
 
 GO1_ACTUATOR_CFG = DelayedActuatorNetMLPCfg(
     joint_names_expr=[".*_hip_joint", ".*_thigh_joint",],
-    network_file=f"{ISAACLAB_NUCLEUS_DIR}/ActuatorNets/Unitree/unitree_go1.pt",
+    network_file="omniverse://localhost/Library/go1_description/unitree_go1.pt",
     pos_scale=-1.0,
     vel_scale=1.0,
-    torque_scale=1.0,
+    torque_scale=1.,
     input_order="pos_vel",
     input_idx=[0, 1, 2],
     effort_limit=23.7,
     velocity_limit=30.0,  # taken from spec sheet
     saturation_effort=23.7,  # same as effort limit
+    min_delay=0,
+    max_delay=1
 )
 
 GO1_ACTUATOR_CFG_KNEE = DelayedActuatorNetMLPCfg(
     joint_names_expr=[".*_calf_joint"],
-    network_file=f"{ISAACLAB_NUCLEUS_DIR}/ActuatorNets/Unitree/unitree_go1.pt",
+    network_file="omniverse://localhost/Library/go1_description/unitree_go1.pt",
     pos_scale=-1.0,
     vel_scale=1.0,
-    torque_scale=1.0,
+    torque_scale=1.,
     input_order="pos_vel",
     input_idx=[0, 1, 2],
     effort_limit=35.55,
     velocity_limit=30.0,  # taken from spec sheet
     saturation_effort=35.55,  # same as effort limit
-    max_delay=50,
-    min_delay=10,
+    min_delay=0,
+    max_delay=1, # number of dT (~20ms)
 )
 """Configuration of Go1 actuators using MLP model.
 
@@ -107,6 +111,24 @@ UNITREE_GO1_CFG = ArticulationCfg(
 )
 """Configuration of Unitree Go1 using MLP-based actuator model."""
 
+COBBLESTONE_ROAD_CFG = terrain_gen.TerrainGeneratorCfg(
+    size=(8.0, 8.0),
+    border_width=20.0,
+    num_rows=9,
+    num_cols=21,
+    horizontal_scale=0.1,
+    vertical_scale=0.005,
+    slope_threshold=0.75,
+    difficulty_range=(0.0, 1.0),
+    use_cache=False,
+    sub_terrains={
+        "flat": terrain_gen.MeshPlaneTerrainCfg(proportion=0.2),
+        # "random_rough": terrain_gen.HfRandomUniformTerrainCfg(
+        #     proportion=0.2, noise_range=(0.01, 0.01), noise_step=0.01, border_width=0.25
+        # ),
+    },
+)
+
 
 @configclass
 class MySceneCfg(InteractiveSceneCfg):
@@ -115,8 +137,8 @@ class MySceneCfg(InteractiveSceneCfg):
     # ground terrain
     terrain = TerrainImporterCfg(
         prim_path="/World/ground",
-        terrain_type="plane",
-        terrain_generator=None,
+        terrain_type="generator",
+        terrain_generator=COBBLESTONE_ROAD_CFG,
         collision_group=-1,
         physics_material=sim_utils.RigidBodyMaterialCfg(
             friction_combine_mode="multiply",
@@ -209,6 +231,7 @@ class ObservationsCfg:
         actions = ObsTerm(func=mdp.last_action)
 
         def __post_init__(self):
+            # TODO - Make noise back
             self.enable_corruption = False
             self.concatenate_terms = True
 
@@ -284,11 +307,11 @@ class RewardsCfg:
         params={"command_name": "base_velocity", "std": math.sqrt(0.25)},
     )
     # -- penalties
-    lin_vel_z_l2 = RewTerm(func=mdp.lin_vel_z_l2, weight=-2.0)
-    ang_vel_xy_l2 = RewTerm(func=mdp.ang_vel_xy_l2, weight=-0.05)
+    lin_vel_z_l2 = RewTerm(func=mdp.lin_vel_z_l2, weight=-2.0e-1)
+    ang_vel_xy_l2 = RewTerm(func=mdp.ang_vel_xy_l2, weight=-0.005)
     dof_torques_l2 = RewTerm(func=mdp.joint_torques_l2, weight=-2.0e-5)
-    dof_acc_l2 = RewTerm(func=mdp.joint_acc_l2, weight=-2.5e-7)
-    action_rate_l2 = RewTerm(func=mdp.action_rate_l2, weight=-0.001)
+    dof_acc_l2 = RewTerm(func=mdp.joint_acc_l2, weight=-2.5e-9)
+    # action_rate_l2 = RewTerm(func=mdp.action_rate_l2, weight=-0.001)
     feet_air_time = RewTerm(
         func=mdp.feet_air_time,
         weight=0.25,
@@ -298,6 +321,7 @@ class RewardsCfg:
             "threshold": 0.5,
         },
     )
+    
     undesired_contacts = RewTerm(
         func=mdp.undesired_contacts,
         weight=-1.0,
@@ -308,7 +332,7 @@ class RewardsCfg:
     )
     
     # -- optional penalties
-    flat_orientation_l2 = RewTerm(func=mdp.flat_orientation_l2, weight=-2.5)
+    flat_orientation_l2 = RewTerm(func=mdp.flat_orientation_l2, weight=-2.5e-1)
     dof_pos_limits = RewTerm(func=mdp.joint_pos_limits, weight=0.0)
 
 
@@ -354,7 +378,7 @@ class UnitreeGo1FlatEnvCfg(ManagerBasedRLEnvCfg):
         self.episode_length_s = 20.0
 
         # simulation settings
-        self.sim.dt = 0.005
+        self.sim.dt = 0.005 # 5ms or 200 hz
         self.sim.render_interval = self.decimation
         self.sim.disable_contact_processing = True
         self.sim.physics_material = self.scene.terrain.physics_material

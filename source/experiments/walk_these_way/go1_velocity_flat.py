@@ -11,6 +11,7 @@ from omni.isaac.lab.envs.manager_based_rl_env import ManagerBasedRLEnv
 from omni.isaac.lab.managers.manager_base import ManagerTermBase
 from omni.isaac.lab.managers.manager_term_cfg import EventTermCfg, ObservationTermCfg
 from omni.isaac.lab.sensors import RayCasterCfg, patterns
+from omni.isaac.lab.sensors.contact_sensor.contact_sensor import ContactSensor
 
 import torch
 from omni.isaac.lab.envs.manager_based_env import ManagerBasedEnv
@@ -121,21 +122,17 @@ UNITREE_GO1_CFG = ArticulationCfg(
 COBBLESTONE_ROAD_CFG = terrain_gen.TerrainGeneratorCfg(
     size=(10.0, 10.0),
     border_width=20.0,
-    num_rows=50,
-    num_cols=50,
+    num_rows=64,
+    num_cols=64,
     horizontal_scale=0.25,
     vertical_scale=0.01,
     slope_threshold=0.75,
     difficulty_range=(0.0, 1.0),
     use_cache=False,
     sub_terrains={
-        "random_rough": terrain_gen.HfSteppingStonesTerrainCfg(
-            # proportion=0.2,
-            stone_height_max=0.1,
-            stone_width_range=(0.25, 2),
-            stone_distance_range=(0.25, 2),
-            holes_depth=-0.05,
-            platform_width=3,
+        "random_rough": terrain_gen.HfRandomUniformTerrainCfg(
+            # proportion=1, 
+            noise_range=(0.01, 0.06), noise_step=0.01, border_width=0.25
         ),
     },
 )
@@ -309,13 +306,33 @@ class observe_rigid_body_material(ManagerTermBase):
         )
         return tmp
 
-
 def observer_total_mass(env: ManagerBasedEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")) -> torch.Tensor:
     """Root linear velocity in the asset's root frame."""
     # extract the used quantities (to enable type-hinting)
     asset: RigidObject = env.scene[asset_cfg.name]
     masses = asset.root_physx_view.get_masses()
-    return masses.sum(dim=1).unsqueeze(-1).clone().to(asset.data.device)
+    return masses.sum(dim=1).unsqueeze(-1).clone().to(asset.data.device) / 10
+
+def foot_contact(env: ManagerBasedRLEnv, threshold: float, sensor_cfg: SceneEntityCfg) -> torch.Tensor:
+    """Penalize undesired contacts as the number of violations that are above a threshold."""
+    # extract the used quantities (to enable type-hinting)
+    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+    # check if contact force is above threshold
+    net_contact_forces = contact_sensor.data.net_forces_w_history
+    is_contact = torch.max(torch.norm(net_contact_forces[:, :, sensor_cfg.body_ids], dim=-1), dim=1)[0] > threshold
+    # sum over contacts for each environment
+    return is_contact
+
+def last_action(env: ManagerBasedEnv, action_name: str | None = None) -> torch.Tensor:
+    """The last input action to the environment.
+
+    The name of the action term for which the action is required. If None, the
+    entire action tensor is returned.
+    """
+    if action_name is None:
+        return env.action_manager.action / 25
+    else:
+        return env.action_manager.get_term(action_name).raw_actions / 25
 
 
 @configclass
@@ -344,26 +361,37 @@ class ObservationsCfg:
             func=mdp.joint_pos_rel, noise=Unoise(n_min=-0.01, n_max=0.01)
         )
         joint_vel = ObsTerm(func=mdp.joint_vel_rel, noise=Unoise(n_min=-1.5, n_max=1.5))
-        actions = ObsTerm(func=mdp.last_action)
+
+        actions = ObsTerm(func=last_action)
+
+        undesired_contacts = ObsTerm(
+            func=foot_contact,
+            params={
+                "sensor_cfg": SceneEntityCfg("contact_forces", body_names=[".*foot"]),
+                "threshold": 1.0,
+            },
+        )
 
         # Privileged observations
         foot_friction = ObsTerm(
             func=observe_rigid_body_material,
             params={"asset_cfg": SceneEntityCfg("robot", body_names=".*_foot.*")},
         )
+        
         total_mass = ObsTerm(
             func=observer_total_mass,
             params={"asset_cfg": SceneEntityCfg("robot", body_names=".*")},
         )  
+        
         height_scan = ObsTerm(
             func=mdp.height_scan,
             params={"sensor_cfg": SceneEntityCfg("height_scanner")},
-            noise=Unoise(n_min=-0.1, n_max=0.1),
+            noise=Unoise(n_min=-0.05, n_max=0.05),
             clip=(-1.0, 1.0),
         )
          
         def __post_init__(self):
-            self.enable_corruption = False
+            self.enable_corruption = True
             self.concatenate_terms = True
 
     # observation groups
@@ -449,6 +477,17 @@ def track_lin_vel_xy_exp(
     return torch.exp(-lin_vel_error / std**2)
 
 
+def track_ang_vel_z_exp(
+    env: ManagerBasedRLEnv, std: float, command_name: str, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")
+) -> torch.Tensor:
+    """Reward tracking of angular velocity commands (yaw) using exponential kernel."""
+    # extract the used quantities (to enable type-hinting)
+    asset: RigidObject = env.scene[asset_cfg.name]
+    # compute the error
+    ang_vel_error = torch.square(env.command_manager.get_command(command_name)[:, 2] - asset.data.root_ang_vel_b[:, 2])
+    return torch.exp(-ang_vel_error / std**2)
+
+
 @configclass
 class RewardsCfg:
     """Reward terms for the MDP."""
@@ -460,16 +499,17 @@ class RewardsCfg:
         params={"command_name": "base_velocity", "std": math.sqrt(0.25)},
     )
     track_ang_vel_z_exp = RewTerm(
-        func=mdp.track_ang_vel_z_exp,
+        func=track_ang_vel_z_exp,
         weight=0.75,
         params={"command_name": "base_velocity", "std": math.sqrt(0.25)},
     )
+
     # -- penalties
-    lin_vel_z_l2 = RewTerm(func=mdp.lin_vel_z_l2, weight=-2.0)
-    ang_vel_xy_l2 = RewTerm(func=mdp.ang_vel_xy_l2, weight=-0.1)
+    lin_vel_z_l2 = RewTerm(func=mdp.lin_vel_z_l2, weight=-2.0e-2)
+    ang_vel_xy_l2 = RewTerm(func=mdp.ang_vel_xy_l2, weight=-0.1e-2)
     dof_torques_l2 = RewTerm(func=mdp.joint_torques_l2, weight=-1.0e-5)
-    dof_acc_l2 = RewTerm(func=mdp.joint_acc_l2, weight=-2.5e-7)
-    action_rate_l2 = RewTerm(func=mdp.action_rate_l2, weight=-0.01)
+    dof_acc_l2 = RewTerm(func=mdp.joint_acc_l2, weight=-2.5e-8)
+    action_rate_l2 = RewTerm(func=mdp.action_rate_l2, weight=-1.0e-3)
     feet_air_time = RewTerm(
         func=mdp.feet_air_time,
         weight=0.25,
@@ -491,7 +531,6 @@ class RewardsCfg:
     # -- optional penalties
     flat_orientation_l2 = RewTerm(func=mdp.flat_orientation_l2, weight=-1.0)
     dof_pos_limits = RewTerm(func=mdp.joint_pos_limits, weight=0.0)
-
     termination_penalty = RewTerm(func=mdp.is_terminated, weight=-100.0)
 
 @configclass
@@ -518,7 +557,7 @@ class UnitreeGo1FlatEnvCfg(ManagerBasedRLEnvCfg):
     """Configuration for the locomotion velocity-tracking environment."""
 
     # Scene settings
-    scene: MySceneCfg = MySceneCfg(num_envs=4096, env_spacing=10)
+    scene: MySceneCfg = MySceneCfg(num_envs=4096, env_spacing=5)
     # Basic settings
     observations: ObservationsCfg = ObservationsCfg()
     actions: ActionsCfg = ActionsCfg()

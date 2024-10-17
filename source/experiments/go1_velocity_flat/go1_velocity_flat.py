@@ -91,7 +91,7 @@ UNITREE_GO1_CFG = ArticulationCfg(
         ),
     ),
     init_state=ArticulationCfg.InitialStateCfg(
-        pos=(0.0, 0.0, 0.4),
+        pos=(0.0, 0.0, 0.3),
         joint_pos={
             ".*L_hip_joint": 0.1,
             ".*R_hip_joint": -0.1,
@@ -120,13 +120,8 @@ COBBLESTONE_ROAD_CFG = terrain_gen.TerrainGeneratorCfg(
     difficulty_range=(0.0, 1.0),
     use_cache=False,
     sub_terrains={
-        "random_rough": terrain_gen.HfSteppingStonesTerrainCfg(
-            #proportion=0.2,
-            stone_height_max=0.1,
-            stone_width_range=(0.25, 2),
-            stone_distance_range=(0.25, 2),
-            holes_depth=-.05,
-            platform_width=3,
+        "random_rough": terrain_gen.HfRandomUniformTerrainCfg(
+            noise_range=(0.01, 0.05), noise_step=0.01, downsampled_scale=None
         ),
     },
 )
@@ -168,7 +163,8 @@ class MySceneCfg(InteractiveSceneCfg):
             intensity=750.0,
             texture_file=f"{ISAAC_NUCLEUS_DIR}/Materials/Textures/Skies/PolyHaven/kloofendal_43d_clear_puresky_4k.hdr",
         ),
-    ) 
+    )
+
 
 ##
 # MDP settings
@@ -186,8 +182,8 @@ class CommandsCfg:
         heading_control_stiffness=0.5,
         debug_vis=True,
         ranges=mdp.UniformVelocityCommandCfg.Ranges(
-            lin_vel_x=(-.50, 1.5),
-            lin_vel_y=(-.10, .10),
+            lin_vel_x=(-0.50, 1.5),
+            lin_vel_y=(-0.10, 0.10),
             ang_vel_z=(-1.0, 1.0),
             heading=(-math.pi, math.pi),
         ),
@@ -199,9 +195,21 @@ class ActionsCfg:
     """Action specifications for the MDP."""
 
     joint_pos = mdp.JointPositionActionCfg(
-        asset_name="robot", joint_names=[".*"], scale=0.25, use_default_offset=True
+        asset_name="robot", joint_names=[
+            "FL_hip_joint",
+            "FL_thigh_joint",
+            "FL_calf_joint",
+            "FR_hip_joint",
+            "FR_thigh_joint",
+            "FR_calf_joint",
+            "RL_hip_joint",
+            "RL_thigh_joint",
+            "RL_calf_joint",
+            "RR_hip_joint",
+            "RR_thigh_joint",
+            "RR_calf_joint",
+        ], scale=0.25, use_default_offset=True,preserve_order=True
     )
-
 
 @configclass
 class ObservationsCfg:
@@ -212,12 +220,12 @@ class ObservationsCfg:
         """Observations for policy group."""
 
         # observation terms (order preserved)
-        base_lin_vel = ObsTerm(
-            func=mdp.base_lin_vel, noise=Unoise(n_min=-0.1, n_max=0.1)
-        )
-        base_ang_vel = ObsTerm(
-            func=mdp.base_ang_vel, noise=Unoise(n_min=-0.2, n_max=0.2)
-        )
+        # base_lin_vel = ObsTerm(
+        #     func=mdp.base_lin_vel, noise=Unoise(n_min=-0.1, n_max=0.1)
+        # )
+        # base_ang_vel = ObsTerm(
+        #     func=mdp.base_ang_vel, noise=Unoise(n_min=-0.2, n_max=0.2)
+        # )
         projected_gravity = ObsTerm(
             func=mdp.projected_gravity,
             noise=Unoise(n_min=-0.05, n_max=0.05),
@@ -272,7 +280,7 @@ class EventCfg:
         mode="reset",
         params={
             "asset_cfg": SceneEntityCfg("robot", body_names="trunk"),
-            "force_range": (0.0, 0.0),
+            "force_range": (-5.0, 5.0),
             "torque_range": (-0.0, 0.0),
         },
     )
@@ -302,6 +310,7 @@ class EventCfg:
         },
     )
 
+
 @configclass
 class RewardsCfg:
     """Reward terms for the MDP."""
@@ -318,9 +327,9 @@ class RewardsCfg:
         params={"command_name": "base_velocity", "std": math.sqrt(0.25)},
     )
     # -- penalties
-    lin_vel_z_l2 = RewTerm(func=mdp.lin_vel_z_l2, weight=-2.0)
+    lin_vel_z_l2 = RewTerm(func=mdp.lin_vel_z_l2, weight=-0.5)
     ang_vel_xy_l2 = RewTerm(func=mdp.ang_vel_xy_l2, weight=-0.05)
-    dof_torques_l2 = RewTerm(func=mdp.joint_torques_l2, weight=-2.0e-4)
+    dof_torques_l2 = RewTerm(func=mdp.joint_torques_l2, weight=-2.0e-5)
     dof_acc_l2 = RewTerm(func=mdp.joint_acc_l2, weight=-2.5e-7)
     action_rate_l2 = RewTerm(func=mdp.action_rate_l2, weight=-0.01)
     feet_air_time = RewTerm(
@@ -340,11 +349,11 @@ class RewardsCfg:
             "threshold": 1.0,
         },
     )
-    
+
     # -- optional penalties
     flat_orientation_l2 = RewTerm(func=mdp.flat_orientation_l2, weight=-2.5)
-    dof_pos_limits = RewTerm(func=mdp.joint_pos_limits, weight=0.0)
-
+    dof_pos_limits = RewTerm(func=mdp.joint_pos_limits, weight=-0.1)
+    termination = RewTerm(func=mdp.is_terminated, weight=-10)
 
 @configclass
 class TerminationsCfg:
@@ -409,7 +418,7 @@ class UnitreeGo1FlatEnvCfg_PLAY(UnitreeGo1FlatEnvCfg):
         self.scene.terrain.terrain_generator.num_cols = 8
         self.scene.terrain.terrain_generator.num_rows = 8
         self.scene.terrain.terrain_generator.size = (2, 2)
-        
+
         # disable randomization for play
         self.observations.policy.enable_corruption = False
         # remove random pushing event

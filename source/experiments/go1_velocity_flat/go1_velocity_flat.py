@@ -4,7 +4,9 @@
 # SPDX-License-Identifier: BSD-3-Clause
 
 import math
-
+import torch
+from omni.isaac.lab.envs.manager_based_rl_env import ManagerBasedRLEnv
+from omni.isaac.lab.sensors.contact_sensor.contact_sensor import ContactSensor
 import omni.isaac.lab.sim as sim_utils
 import omni.isaac.lab_tasks.manager_based.locomotion.velocity.mdp as mdp
 from omni.isaac.lab.actuators import DelayedActuatorNetMLPCfg
@@ -152,10 +154,12 @@ class MySceneCfg(InteractiveSceneCfg):
     )
     # robots
     robot: ArticulationCfg = UNITREE_GO1_CFG
+
     # sensors
     contact_forces = ContactSensorCfg(
         prim_path="{ENV_REGEX_NS}/Robot/.*", history_length=3, track_air_time=True
     )
+
     # lights
     sky_light = AssetBaseCfg(
         prim_path="/World/skyLight",
@@ -195,7 +199,8 @@ class ActionsCfg:
     """Action specifications for the MDP."""
 
     joint_pos = mdp.JointPositionActionCfg(
-        asset_name="robot", joint_names=[
+        asset_name="robot",
+        joint_names=[
             "FL_hip_joint",
             "FL_thigh_joint",
             "FL_calf_joint",
@@ -208,8 +213,29 @@ class ActionsCfg:
             "RR_hip_joint",
             "RR_thigh_joint",
             "RR_calf_joint",
-        ], scale=0.25, use_default_offset=True,preserve_order=True
+        ],
+        scale=0.25,
+        use_default_offset=True,
+        preserve_order=True,
     )
+
+
+def contact_observer(
+    env: ManagerBasedRLEnv, threshold: float, sensor_cfg: SceneEntityCfg
+) -> torch.Tensor:
+    """Penalize undesired contacts as the number of violations that are above a threshold."""
+    # extract the used quantities (to enable type-hinting)
+    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+    # check if contact force is above threshold
+    net_contact_forces = contact_sensor.data.net_forces_w_history
+    
+    
+    is_contact = (
+       torch.sum(torch.abs(net_contact_forces[:, 0, sensor_cfg.body_ids, :]),dim=2) > threshold
+    )
+    # sum over contacts for each environment
+    return is_contact
+
 
 @configclass
 class ObservationsCfg:
@@ -237,7 +263,20 @@ class ObservationsCfg:
             func=mdp.joint_pos_rel, noise=Unoise(n_min=-0.01, n_max=0.01)
         )
         joint_vel = ObsTerm(func=mdp.joint_vel_rel, noise=Unoise(n_min=-1.5, n_max=1.5))
+
         actions = ObsTerm(func=mdp.last_action)
+
+        feet_air_time = ObsTerm(
+            func=contact_observer,
+            params={
+                "sensor_cfg": SceneEntityCfg(
+                    "contact_forces",
+                    body_names=["FL_foot", "FR_foot", "RL_foot", "RR_foot"],
+                    preserve_order=True,
+                ),
+                "threshold": 0.5,
+            },
+        )
 
         def __post_init__(self):
             self.enable_corruption = False
@@ -354,6 +393,7 @@ class RewardsCfg:
     flat_orientation_l2 = RewTerm(func=mdp.flat_orientation_l2, weight=-2.5)
     dof_pos_limits = RewTerm(func=mdp.joint_pos_limits, weight=-0.1)
     termination = RewTerm(func=mdp.is_terminated, weight=-10)
+
 
 @configclass
 class TerminationsCfg:

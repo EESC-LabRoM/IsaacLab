@@ -186,7 +186,7 @@ class CommandsCfg:
         heading_control_stiffness=0.5,
         debug_vis=True,
         ranges=mdp.UniformVelocityCommandCfg.Ranges(
-            lin_vel_x=(-0.50, 1.5),
+            lin_vel_x=(-0.50, 1.),
             lin_vel_y=(-0.10, 0.10),
             ang_vel_z=(-1.0, 1.0),
             heading=(-math.pi, math.pi),
@@ -403,7 +403,7 @@ class TerminationsCfg:
     base_contact = DoneTerm(
         func=mdp.illegal_contact,
         params={
-            "sensor_cfg": SceneEntityCfg("contact_forces", body_names="trunk"),
+            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=["trunk", ".*_calf", ".*_thigh", ".*_hip"]),
             "threshold": 1.0,
         },
     )

@@ -26,6 +26,8 @@ models:
         layers: [256, 128]
         activations: elu
     output: ONE
+    normalize_value: True
+    value_bootstrap: True
 
 
 # Rollout memory
@@ -39,7 +41,7 @@ memory:
 # https://skrl.readthedocs.io/en/latest/api/agents/ppo.html
 agent:
   class: PPO
-  rollouts: 24
+  rollouts: 21
   learning_epochs: 5
   mini_batches: 4
   discount_factor: 0.99
@@ -48,7 +50,7 @@ agent:
   learning_rate_scheduler: KLAdaptiveLR
   learning_rate_scheduler_kwargs:
     kl_threshold: 0.01
-  state_preprocessor: null
+  state_preprocessor: RunningStandardScaler
   state_preprocessor_kwargs: null
   value_preprocessor: null
   value_preprocessor_kwargs: null
@@ -75,5 +77,5 @@ agent:
 # https://skrl.readthedocs.io/en/latest/api/trainers/sequential.html
 trainer:
   class: SequentialTrainer
-  timesteps: 12000
+  timesteps: 70000
   environment_info: log

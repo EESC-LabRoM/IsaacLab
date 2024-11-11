@@ -381,8 +381,7 @@ def feet_contact_forces(
     env: ManagerBasedRLEnv, sensor_cfg: SceneEntityCfg) -> torch.Tensor:
     # Getting global values and parameters for the evaluation
     global desired_contact_states
-    if desired_contact_states is None:
-        init_desired_contact_states(env)
+    init_desired_contact_states(env)
 
     std = 0.25
 
@@ -403,8 +402,7 @@ def feet_contact_vel(
     env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg) -> torch.Tensor:
     # Getting global values and parameters for the evaluation
     global desired_contact_states
-    if desired_contact_states is None:
-        init_desired_contact_states(env)
+    init_desired_contact_states(env)
 
     std = 0.25
 
@@ -504,8 +502,7 @@ def foot_clearance_reward(
 ) -> torch.Tensor:
     """Reward the swinging feet for clearing a specified height off the ground"""
     global desired_contact_states
-    if desired_contact_states is None:
-        init_desired_contact_states(env)
+    init_desired_contact_states(env)
 
     global gaits, step_frequency_cmd
     gait = torch.tensor(gaits["trotting"], device=env.device)
@@ -638,11 +635,11 @@ class RewardsCfg:
     # -- TASK
     # xy velocity traking
     track_lin_vel_xy_exp = RewTerm(
-        func=track_lin_vel_xy_exp, weight=0.2,
+        func=track_lin_vel_xy_exp, weight=0.6,
         params={"command_name": "base_velocity", "std": math.sqrt(0.25)},)
     # yaw velocity traking
     track_ang_vel_z_exp = RewTerm(
-        func=track_ang_vel_z_exp, weight=0.1,
+        func=track_ang_vel_z_exp, weight=0.3,
         params={"command_name": "base_velocity", "std": math.sqrt(0.25)},)
     # z velocity traking
     #track_lin_vel_z = RewTerm(
@@ -653,12 +650,12 @@ class RewardsCfg:
     # -- AUGMENTED AUXILIARY
     # swing phase traking (force)
     contact_forces = RewTerm(
-        func=feet_contact_forces, weight=0.08,
+        func=feet_contact_forces, weight=-0.08,
         params={
             "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_foot")})
     # stance phase traking (velocity)
     contact_vel = RewTerm(
-        func=feet_contact_vel, weight=0.08,
+        func=feet_contact_vel, weight=-0.08,
         params={
             "asset_cfg": SceneEntityCfg("robot", body_names=".*_foot")})
     # body height tracking
